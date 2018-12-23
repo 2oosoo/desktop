@@ -1,46 +1,86 @@
 import * as React from 'react'
+import { GitHubRepository } from '../../models/github-repository'
 import { Commit } from '../../models/commit'
 import { CommitListItem } from './commit-list-item'
-import { List } from '../list'
-import { IGitHubUser } from '../../lib/dispatcher'
+import { List } from '../lib/list'
+import { IGitHubUser } from '../../lib/databases'
 
-const RowHeight = 48
+const RowHeight = 50
 
 interface ICommitListProps {
-  readonly onCommitChanged: (commit: Commit) => void
-  readonly onScroll: (start: number, end: number) => void
-  readonly history: ReadonlyArray<string>
-  readonly commits: Map<string, Commit>
+  /** The GitHub repository associated with this commit (if found) */
+  readonly gitHubRepository: GitHubRepository | null
+
+  /** The list of commits SHAs to display, in order. */
+  readonly commitSHAs: ReadonlyArray<string>
+
+  /** The commits loaded, keyed by their full SHA. */
+  readonly commitLookup: Map<string, Commit>
+
+  /** The SHA of the selected commit */
   readonly selectedSHA: string | null
+
+  /** The lookup for GitHub users related to this repository */
   readonly gitHubUsers: Map<string, IGitHubUser>
+
+  /** The emoji lookup to render images inline */
   readonly emoji: Map<string, string>
+
+  /** The list of known local commits for the current branch */
+  readonly localCommitSHAs: ReadonlyArray<string>
+
+  /** The message to display inside the list when no results are displayed */
+  readonly emptyListMessage: JSX.Element | string
+
+  /** Callback which fires when a commit has been selected in the list */
+  readonly onCommitSelected: (commit: Commit) => void
+
+  /** Callback that fires when a scroll event has occurred */
+  readonly onScroll: (start: number, end: number) => void
+
+  /** Callback to fire to revert a given commit in the current repository */
+  readonly onRevertCommit: (commit: Commit) => void
+
+  /** Callback to fire to open a given commit on GitHub */
+  readonly onViewCommitOnGitHub: (sha: string) => void
 }
 
 /** A component which displays the list of commits. */
-export class CommitList extends React.Component<ICommitListProps, void> {
-  private list: List | null
-
+export class CommitList extends React.Component<ICommitListProps, {}> {
   private renderCommit = (row: number) => {
-    const sha = this.props.history[row]
-    const commit = this.props.commits.get(sha)
-    if (!commit) {
+    const sha = this.props.commitSHAs[row]
+    const commit = this.props.commitLookup.get(sha)
+
+    if (commit == null) {
+      if (__DEV__) {
+        log.warn(
+          `[CommitList]: the commit '${sha}' does not exist in the cache`
+        )
+      }
       return null
     }
 
-    const gitHubUser = this.props.gitHubUsers.get(commit.author.email.toLowerCase()) || null
-    let avatarUser = null
-    if (gitHubUser) {
-      avatarUser = { ...commit.author, avatarURL: gitHubUser.avatarURL }
-    }
+    const isLocal = this.props.localCommitSHAs.indexOf(commit.sha) > -1
 
-    return <CommitListItem key={commit.sha} commit={commit} user={avatarUser} emoji={this.props.emoji}/>
+    return (
+      <CommitListItem
+        key={commit.sha}
+        gitHubRepository={this.props.gitHubRepository}
+        isLocal={isLocal}
+        commit={commit}
+        gitHubUsers={this.props.gitHubUsers}
+        emoji={this.props.emoji}
+        onRevertCommit={this.props.onRevertCommit}
+        onViewCommitOnGitHub={this.props.onViewCommitOnGitHub}
+      />
+    )
   }
 
-  private onRowChanged = (row: number) => {
-    const sha = this.props.history[row]
-    const commit = this.props.commits.get(sha)
+  private onSelectedRowChanged = (row: number) => {
+    const sha = this.props.commitSHAs[row]
+    const commit = this.props.commitLookup.get(sha)
     if (commit) {
-      this.props.onCommitChanged(commit)
+      this.props.onCommitSelected(commit)
     }
   }
 
@@ -53,39 +93,34 @@ export class CommitList extends React.Component<ICommitListProps, void> {
 
   private rowForSHA(sha_: string | null): number {
     const sha = sha_
-    if (!sha) { return -1 }
+    if (!sha) {
+      return -1
+    }
 
-    return this.props.history.findIndex(s => s === sha)
-  }
-
-  private onListRef = (ref: List) => {
-    this.list = ref
+    return this.props.commitSHAs.findIndex(s => s === sha)
   }
 
   public render() {
-
-    if (this.props.history.length === 0) {
+    if (this.props.commitSHAs.length === 0) {
       return (
-        <div className='panel blankslate'>
-          No history
-        </div>
+        <div className="panel blankslate">{this.props.emptyListMessage}</div>
       )
     }
 
     return (
-      <div id='commit-list'>
-        <List ref={this.onListRef}
-              rowCount={this.props.history.length}
-              rowHeight={RowHeight}
-              selectedRow={this.rowForSHA(this.props.selectedSHA)}
-              rowRenderer={this.renderCommit}
-              onSelectionChanged={this.onRowChanged}
-              onScroll={this.onScroll}
-              invalidationProps={{
-                history: this.props.history,
-                gitHubUsers: this.props.gitHubUsers,
-              }}
-            />
+      <div id="commit-list">
+        <List
+          rowCount={this.props.commitSHAs.length}
+          rowHeight={RowHeight}
+          selectedRows={[this.rowForSHA(this.props.selectedSHA)]}
+          rowRenderer={this.renderCommit}
+          onSelectedRowChanged={this.onSelectedRowChanged}
+          onScroll={this.onScroll}
+          invalidationProps={{
+            commits: this.props.commitSHAs,
+            gitHubUsers: this.props.gitHubUsers,
+          }}
+        />
       </div>
     )
   }

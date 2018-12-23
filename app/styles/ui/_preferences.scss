@@ -1,6 +1,5 @@
 #preferences {
   .accounts-tab {
-
     .account-info {
       .avatar {
         // 32px for the image + 2 on each side for the base border.
@@ -26,4 +25,18 @@
       }
     }
   }
+
+  .no-options-found {
+    label {
+      margin-bottom: 0;
+    }
+
+    span {
+      color: var(--text-secondary-color);
+    }
+  }
+}
+
+#external-editor-error {
+  width: 450px;
 }

@@ -3,8 +3,22 @@ notifications:
     on_success: never
     on_failure: change
 
-os:
-  - osx
+dist: trusty
+
+os: linux
+compiler: clang
+
+env:
+  - CC=clang CXX=clang++ npm_config_clang=1
+
+addons:
+  apt:
+    packages:
+      # this is required to compile keytar
+      - libsecret-1-dev
+      # this package is essential for testing Electron in a headless fashion
+      # https://github.com/electron/electron/blob/master/docs/tutorial/testing-on-headless-ci.md
+      - xvfb
 
 branches:
   only:
@@ -13,28 +27,23 @@ branches:
 
 language: node_js
 node_js:
-  - "7"
+  - '8.12'
 
 cache:
+  yarn: true
   timeout: 600
   directories:
     - node_modules
     - $HOME/.electron
+    - .eslintcache
+    - $HOME/.cache/electron-builder
 
 install:
-  - npm install -g npm
-  - npm prune
-  - cd app && npm prune && cd ..
-  - npm install
+  - yarn install --force
 
 script:
-  - npm run lint
-  - npm run build:prod
-  - npm run test:setup
-  - npm test
-
-after_success:
-  - npm run publish
+  - yarn lint && yarn validate-changelog && yarn build:prod && yarn test:setup
+    && yarn test && yarn test:report
 
 after_failure:
-  - npm run test:review
+  - yarn test:review

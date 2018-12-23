@@ -1,30 +1,81 @@
 import { CommitIdentity } from './commit-identity'
+import { ITrailer, isCoAuthoredByTrailer } from '../lib/git/interpret-trailers'
+import { GitAuthor } from './git-author'
+
+/** Grouping of information required to create a commit */
+export interface ICommitContext {
+  /**
+   * The summary of the commit message (required)
+   */
+  readonly summary: string
+  /**
+   * Additional details for the commit message (optional)
+   */
+  readonly description: string | null
+  /**
+   * An optional array of commit trailers (for example Co-Authored-By trailers) which will be appended to the commit message in accordance with the Git trailer configuration.
+   */
+  readonly trailers?: ReadonlyArray<ITrailer>
+}
+
+/**
+ * Extract any Co-Authored-By trailers from an array of arbitrary
+ * trailers.
+ */
+function extractCoAuthors(trailers: ReadonlyArray<ITrailer>) {
+  const coAuthors = []
+
+  for (const trailer of trailers) {
+    if (isCoAuthoredByTrailer(trailer)) {
+      const author = GitAuthor.parse(trailer.value)
+      if (author) {
+        coAuthors.push(author)
+      }
+    }
+  }
+
+  return coAuthors
+}
 
 /** A git commit. */
 export class Commit {
-  /** The commit's SHA. */
-  public readonly sha: string
-
-  /** The first line of the commit message. */
-  public readonly summary: string
-
-  /** The commit message without the first line and CR. */
-  public readonly body: string
+  /**
+   * A list of co-authors parsed from the commit message
+   * trailers.
+   */
+  public readonly coAuthors: ReadonlyArray<GitAuthor>
 
   /**
-   * Information about the author of this commit.
-   * includes name, email and date.
+   * A value indicating whether the author and the committer
+   * are the same person.
    */
-  public readonly author: CommitIdentity
+  public readonly authoredByCommitter: boolean
 
-  /** The SHAs for the parents of the commit. */
-  public readonly parentSHAs: ReadonlyArray<string>
+  /**
+   * @param sha The commit's SHA.
+   * @param summary The first line of the commit message.
+   * @param body The commit message without the first line and CR.
+   * @param author Information about the author of this commit.
+   *               Includes name, email and date.
+   * @param committer Information about the committer of this commit.
+   *                 Includes name, email and date.
+   * @param parentSHAS The SHAs for the parents of the commit.
+   * @param trailers Parsed, unfolded trailers from the commit message body,
+   *                 if any, as interpreted by `git interpret-trailers`
+   */
+  public constructor(
+    public readonly sha: string,
+    public readonly summary: string,
+    public readonly body: string,
+    public readonly author: CommitIdentity,
+    public readonly committer: CommitIdentity,
+    public readonly parentSHAs: ReadonlyArray<string>,
+    public readonly trailers: ReadonlyArray<ITrailer>
+  ) {
+    this.coAuthors = extractCoAuthors(trailers)
 
-  public constructor(sha: string, summary: string, body: string, author: CommitIdentity, parentSHAs: ReadonlyArray<string>) {
-    this.sha = sha
-    this.summary = summary
-    this.body = body
-    this.author = author
-    this.parentSHAs = parentSHAs
+    this.authoredByCommitter =
+      this.author.name === this.committer.name &&
+      this.author.email === this.committer.email
   }
 }

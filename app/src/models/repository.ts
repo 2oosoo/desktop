@@ -1,64 +1,70 @@
-import * as path from 'path'
+import * as Path from 'path'
 
-import { GitHubRepository, IGitHubRepository } from './github-repository'
+import { GitHubRepository } from './github-repository'
+import { IAheadBehind } from './branch'
 
-/** The data-only interface for Repository for transport across IPC. */
-export interface IRepository {
-  readonly id: number
-  /** The working directory of this repository */
-  readonly path: string
-  readonly gitHubRepository: IGitHubRepository | null
+function getBaseName(path: string): string {
+  const baseName = Path.basename(path)
 
-  /** Was the repository missing on disk last we checked? */
-  readonly missing: boolean
+  if (baseName.length === 0) {
+    // the repository is at the root of the drive
+    // -> show the full path here to show _something_
+    return path
+  }
+
+  return baseName
 }
 
 /** A local repository. */
-export class Repository implements IRepository {
-  public readonly id: number
-  /** The working directory of this repository */
-  public readonly path: string
-  public readonly gitHubRepository: GitHubRepository | null
+export class Repository {
+  public readonly name: string
 
-  /** Was the repository missing on disk last we checked? */
-  public readonly missing: boolean
-
-  /** Create a new Repository from a data-only representation. */
-  public static fromJSON(json: IRepository): Repository {
-    const gitHubRepository = json.gitHubRepository
-    if (gitHubRepository) {
-       return new Repository(json.path, json.id, GitHubRepository.fromJSON(gitHubRepository), json.missing)
-    } else {
-      return new Repository(json.path, json.id, null, json.missing)
-    }
-  }
-
-  public constructor(path: string, id: number, gitHubRepository: GitHubRepository | null, missing: boolean) {
-    this.path = path
-    this.gitHubRepository = gitHubRepository
-    this.id = id
-    this.missing = missing
+  /**
+   * @param path The working directory of this repository
+   * @param missing Was the repository missing on disk last we checked?
+   */
+  public constructor(
+    public readonly path: string,
+    public readonly id: number,
+    public readonly gitHubRepository: GitHubRepository | null,
+    public readonly missing: boolean
+  ) {
+    this.name = (gitHubRepository && gitHubRepository.name) || getBaseName(path)
   }
 
   /**
-   * Create a new repository the same as the receiver but with the given GitHub
-   * repository.
+   * A hash of the properties of the object.
+   *
+   * Objects with the same hash are guaranteed to be structurally equal.
    */
-  public withGitHubRepository(gitHubRepository: GitHubRepository): Repository {
-    return new Repository(this.path, this.id, gitHubRepository, this.missing)
+  public get hash(): string {
+    return `${this.id}+${this.gitHubRepository && this.gitHubRepository.hash}+${
+      this.path
+    }+${this.missing}+${this.name}`
   }
+}
 
-  /** Create a new repository with a changed `missing` flag. */
-  public withMissing(missing: boolean): Repository {
-    return new Repository(this.path, this.id, this.gitHubRepository, missing)
-  }
+/**
+ * A snapshot for the local state for a given repository
+ */
+export interface ILocalRepositoryState {
+  /**
+   * The ahead/behind count for the current branch, or `null` if no tracking
+   * branch found.
+   */
+  readonly aheadBehind: IAheadBehind | null
+  /**
+   * The number of uncommitted changes currently in the repository.
+   */
+  readonly changedFilesCount: number
+}
 
-  /** Create a new repository with a changed path. */
-  public withPath(path: string): Repository {
-    return new Repository(path, this.id, this.gitHubRepository, this.missing)
-  }
+/**
+ * Returns the owner/name alias if associated with a GitHub repository,
+ * otherwise the folder name that contains the repository
+ */
+export function nameOf(repository: Repository) {
+  const { gitHubRepository } = repository
 
-  public get name(): string {
-    return path.basename(this.path)
-  }
+  return gitHubRepository !== null ? gitHubRepository.fullName : repository.name
 }

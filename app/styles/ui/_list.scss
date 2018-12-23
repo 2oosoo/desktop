@@ -7,6 +7,12 @@
   // parent.
   min-width: 0;
 
+  // When zooming the app the Grid may end up extending beyond the
+  // confines of its container by 1px in either direction. That's not
+  // important but if we don't clip the overflow we may end up covering
+  // borders and we don't want that.
+  overflow: hidden;
+
   .ReactVirtualized__Grid {
     background: var(--background-color);
   }
@@ -27,10 +33,14 @@
     // with the height of the content in the main container.
 
     // Hide the actual scroll bar
-    .ReactVirtualized__Grid::-webkit-scrollbar { display: none; }
+    .ReactVirtualized__Grid::-webkit-scrollbar {
+      display: none;
+    }
 
     // Hide the scroll bar by default
-    .fake-scroll { display: none; }
+    .fake-scroll {
+      display: none;
+    }
 
     &:hover {
       .fake-scroll {
@@ -52,8 +62,18 @@
   }
 }
 
-.list-item {
+.list-focus-container {
+  // The selected items must act as the focused element when inside
+  &.focus-within .list-item.selected {
+    --text-color: var(--box-selected-active-text-color);
+    --text-secondary-color: var(--box-selected-active-text-color);
 
+    color: var(--text-color);
+    background-color: var(--box-selected-active-background-color);
+  }
+}
+
+.list-item {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -67,15 +87,13 @@
 
     color: var(--text-color);
     background-color: var(--box-selected-background-color);
-
-    &:focus {
-      --text-color: var(--box-selected-active-text-color);
-      --text-secondary-color: var(--box-selected-active-text-color);
-
-      color: var(--text-color);
-      background-color: var(--box-selected-active-background-color);
-    }
   }
 
-  &:focus { outline: none; }
+  &:focus {
+    outline: none;
+  }
+
+  &:not(.not-selectable):hover {
+    background: var(--list-item-hover-background-color);
+  }
 }

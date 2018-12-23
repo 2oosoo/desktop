@@ -1,10 +1,13 @@
-import { DiffLine, DiffHunk, ITextDiff } from '../../models/diff'
+import { DiffLine, DiffHunk } from '../../models/diff'
 
 /**
  * Locate the diff hunk for the given (absolute) line number in the diff.
  */
-export function diffHunkForIndex(diff: ITextDiff, index: number): DiffHunk | null {
-  const hunk = diff.hunks.find(h => {
+export function diffHunkForIndex(
+  hunks: ReadonlyArray<DiffHunk>,
+  index: number
+): DiffHunk | null {
+  const hunk = hunks.find(h => {
     return index >= h.unifiedDiffStart && index <= h.unifiedDiffEnd
   })
   return hunk || null
@@ -13,20 +16,45 @@ export function diffHunkForIndex(diff: ITextDiff, index: number): DiffHunk | nul
 /**
  * Locate the diff line for the given (absolute) line number in the diff.
  */
-export function diffLineForIndex(diff: ITextDiff, index: number): DiffLine | null {
-  const hunk = diffHunkForIndex(diff, index)
-  if (!hunk) { return null }
+export function diffLineForIndex(
+  hunks: ReadonlyArray<DiffHunk>,
+  index: number
+): DiffLine | null {
+  const hunk = diffHunkForIndex(hunks, index)
+  if (!hunk) {
+    return null
+  }
 
   return hunk.lines[index - hunk.unifiedDiffStart] || null
+}
+
+/** Get the line number as represented in the diff text itself. */
+export function lineNumberForDiffLine(
+  diffLine: DiffLine,
+  hunks: ReadonlyArray<DiffHunk>
+): number {
+  let lineOffset = 0
+  for (const hunk of hunks) {
+    const index = hunk.lines.indexOf(diffLine)
+    if (index > -1) {
+      return index + lineOffset
+    } else {
+      lineOffset += hunk.lines.length
+    }
+  }
+
+  return -1
 }
 
 /**
  * For the given row in the diff, determine the range of elements that
  * should be displayed as interactive, as a hunk is not granular enough
  */
-export function findInteractiveDiffRange(diff: ITextDiff, index: number): { start: number, end: number } | null {
-
-  const hunk = diffHunkForIndex(diff, index)
+export function findInteractiveDiffRange(
+  hunks: ReadonlyArray<DiffHunk>,
+  index: number
+): { start: number; end: number } | null {
+  const hunk = diffHunkForIndex(hunks, index)
   if (!hunk) {
     return null
   }

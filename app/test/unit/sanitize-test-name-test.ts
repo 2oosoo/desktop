@@ -1,5 +1,4 @@
-import * as chai from 'chai'
-const expect = chai.expect
+import { expect } from 'chai'
 
 import { sanitizedBranchName } from '../../src/lib/sanitize-branch'
 
@@ -22,6 +21,18 @@ describe('sanitizedBranchName', () => {
     expect(result).to.equal('hello-')
   })
 
+  it('does not allow name to start with plus', () => {
+    const branchName = '++but-can-still-keep-the-rest'
+    const result = sanitizedBranchName(branchName)
+    expect(result).to.equal('but-can-still-keep-the-rest')
+  })
+
+  it('does not allow name to start with minus', () => {
+    const branchName = '--but-can-still-keep-the-rest'
+    const result = sanitizedBranchName(branchName)
+    expect(result).to.equal('but-can-still-keep-the-rest')
+  })
+
   it('does not allow name to end in `.lock`', () => {
     const branchName = 'foo.lock.lock'
     const result = sanitizedBranchName(branchName)
@@ -40,9 +51,9 @@ describe('sanitizedBranchName', () => {
     expect(result).to.equal('first.dot.is.not.ok')
   })
 
-  it('collapses double dashes', () => {
-    const branchName = 'branch  ? -|name'
+  it('allows double dashes after first character', () => {
+    const branchName = 'branch--name'
     const result = sanitizedBranchName(branchName)
-    expect(result).to.equal('branch-name')
+    expect(result).to.equal(branchName)
   })
 })

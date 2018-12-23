@@ -1,65 +1,74 @@
-/* tslint:disable:no-sync-functions */
-
-import * as chai from 'chai'
-const expect = chai.expect
-
-import { setupEmptyRepository, setupConflictedRepo } from '../fixture-helper'
-import * as Fs from 'fs'
+import * as FSE from 'fs-extra'
 import * as Path from 'path'
 import { GitProcess } from 'dugite'
 
-import { GitStore } from '../../src/lib/dispatcher/git-store'
-import { FileStatus } from '../../src/models/status'
-import { shell } from '../test-app-shell'
-
-import { getCommit, getStatus } from '../../src/lib/git'
+import { shell } from '../helpers/test-app-shell'
+import {
+  setupEmptyRepository,
+  setupFixtureRepository,
+} from '../helpers/repositories'
+import { GitStore } from '../../src/lib/stores'
+import { AppFileStatusKind } from '../../src/models/status'
+import { Repository } from '../../src/models/repository'
+import { Commit } from '../../src/models/commit'
+import { TipState, IValidBranch } from '../../src/models/tip'
+import { getCommit } from '../../src/lib/git'
+import { getStatusOrThrow } from '../helpers/status'
 
 describe('GitStore', () => {
-  it('can discard changes from a repository', async () => {
+  describe('loadCommitBatch', () => {
+    it('includes HEAD when loading commits', async () => {
+      const path = await setupFixtureRepository('repository-with-105-commits')
+      const repo = new Repository(path, -1, null, false)
+      const gitStore = new GitStore(repo, shell)
 
+      const commits = await gitStore.loadCommitBatch('HEAD')
+
+      expect(commits).not.toBeNull()
+      expect(commits).toHaveLength(100)
+      expect(commits![0]).toEqual('708a46eac512c7b2486da2247f116d11a100b611')
+    })
+  })
+
+  it('can discard changes from a repository', async () => {
     const repo = await setupEmptyRepository()
     const gitStore = new GitStore(repo, shell)
 
-    const file = 'README.md'
-    const filePath = Path.join(repo.path, file)
+    const readmeFile = 'README.md'
+    const readmeFilePath = Path.join(repo.path, readmeFile)
 
-    Fs.writeFileSync(filePath, 'SOME WORDS GO HERE\n')
+    await FSE.writeFile(readmeFilePath, 'SOME WORDS GO HERE\n')
 
-    // commit the file
-    await GitProcess.exec([ 'add', file ], repo.path)
-    await GitProcess.exec([ 'commit', '-m', 'added file' ], repo.path)
+    const licenseFile = 'LICENSE.md'
+    const licenseFilePath = Path.join(repo.path, licenseFile)
 
-    Fs.writeFileSync(filePath, 'WRITING SOME NEW WORDS\n')
+    await FSE.writeFile(licenseFilePath, 'SOME WORDS GO HERE\n')
 
+    // commit the readme file but leave the license
+    await GitProcess.exec(['add', readmeFile], repo.path)
+    await GitProcess.exec(['commit', '-m', 'added readme file'], repo.path)
+
+    await FSE.writeFile(readmeFilePath, 'WRITING SOME NEW WORDS\n')
     // setup requires knowing about the current tip
     await gitStore.loadStatus()
 
-    // ignore the file
-    await gitStore.ignore(file)
-
-    let status = await getStatus(repo)
+    let status = await getStatusOrThrow(repo)
     let files = status.workingDirectory.files
 
-    expect(files.length).to.equal(2)
-    expect(files[0].path).to.equal('README.md')
-    expect(files[0].status).to.equal(FileStatus.Deleted)
-    expect(files[1].path).to.equal('.gitignore')
-    expect(files[1].status).to.equal(FileStatus.New)
+    expect(files).toHaveLength(2)
+    expect(files[0].path).toEqual('README.md')
+    expect(files[0].status.kind).toEqual(AppFileStatusKind.Modified)
 
-    // discard the .gitignore change
-    await gitStore.discardChanges([ files[1] ])
+    // discard the LICENSE.md file
+    await gitStore.discardChanges([files[1]])
 
-    // we should see the original file, modified
-    status = await getStatus(repo)
+    status = await getStatusOrThrow(repo)
     files = status.workingDirectory.files
 
-    expect(files.length).to.equal(1)
-    expect(files[0].path).to.equal('README.md')
-    expect(files[0].status).to.equal(FileStatus.Modified)
+    expect(files).toHaveLength(1)
   })
 
   it('can discard a renamed file', async () => {
-
     const repo = await setupEmptyRepository()
     const gitStore = new GitStore(repo, shell)
 
@@ -67,64 +76,137 @@ describe('GitStore', () => {
     const renamedFile = 'NEW-README.md'
     const filePath = Path.join(repo.path, file)
 
-    Fs.writeFileSync(filePath, 'SOME WORDS GO HERE\n')
+    await FSE.writeFile(filePath, 'SOME WORDS GO HERE\n')
 
     // commit the file, and then rename it
-    await GitProcess.exec([ 'add', file ], repo.path)
-    await GitProcess.exec([ 'commit', '-m', 'added file' ], repo.path)
-    await GitProcess.exec([ 'mv', file, renamedFile ], repo.path)
+    await GitProcess.exec(['add', file], repo.path)
+    await GitProcess.exec(['commit', '-m', 'added file'], repo.path)
+    await GitProcess.exec(['mv', file, renamedFile], repo.path)
 
-    const statusBeforeDiscard = await getStatus(repo)
+    const statusBeforeDiscard = await getStatusOrThrow(repo)
     const filesToDiscard = statusBeforeDiscard.workingDirectory.files
 
     // discard the renamed file
     await gitStore.discardChanges(filesToDiscard)
 
-    const status = await getStatus(repo)
+    const status = await getStatusOrThrow(repo)
     const files = status.workingDirectory.files
 
-    expect(files.length).to.equal(0)
+    expect(files).toHaveLength(0)
   })
 
-  it('can undo the first commit', async () => {
-    const repo = await setupEmptyRepository()
-    const gitStore = new GitStore(repo, shell)
+  describe('undo first commit', () => {
+    let repo: Repository | null = null
+    let firstCommit: Commit | null = null
 
-    const file = 'README.md'
-    const filePath = Path.join(repo.path, file)
+    const commitMessage = 'added file'
 
-    Fs.writeFileSync(filePath, 'SOME WORDS GO HERE\n')
+    beforeEach(async () => {
+      repo = await setupEmptyRepository()
 
-    const message = 'added file'
+      const file = 'README.md'
+      const filePath = Path.join(repo.path, file)
 
-    await GitProcess.exec([ 'add', file ], repo.path)
-    await GitProcess.exec([ 'commit', '-m', message ], repo.path)
+      await FSE.writeFile(filePath, 'SOME WORDS GO HERE\n')
 
-    const commit = await getCommit(repo, 'master')
-    expect(commit).to.not.equal(null)
-    expect(commit!.parentSHAs.length).to.equal(0)
+      await GitProcess.exec(['add', file], repo.path)
+      await GitProcess.exec(['commit', '-m', commitMessage], repo.path)
 
-    await gitStore.undoCommit(commit!)
+      firstCommit = await getCommit(repo!, 'master')
+      expect(firstCommit).not.toBeNull()
+      expect(firstCommit!.parentSHAs).toHaveLength(0)
+    })
 
-    const after = await getStatus(repo)
+    it('reports the repository is unborn', async () => {
+      const gitStore = new GitStore(repo!, shell)
 
-    expect(after).to.not.be.null
-    expect(after!.currentTip).to.be.undefined
+      await gitStore.loadStatus()
+      expect(gitStore.tip.kind).toEqual(TipState.Valid)
 
-    const context = gitStore.contextualCommitMessage
-    expect(context).to.not.be.null
-    expect(context!.summary).to.equal(message)
+      await gitStore.undoCommit(firstCommit!)
+
+      const after = await getStatusOrThrow(repo!)
+      expect(after.currentTip).toBeUndefined()
+    })
+
+    it('pre-fills the commit message', async () => {
+      const gitStore = new GitStore(repo!, shell)
+
+      await gitStore.undoCommit(firstCommit!)
+
+      const newCommitMessage = gitStore.commitMessage
+      expect(newCommitMessage).not.toBeNull()
+      expect(newCommitMessage!.summary).toEqual(commitMessage)
+    })
+
+    it('clears the undo commit dialog', async () => {
+      const gitStore = new GitStore(repo!, shell)
+
+      await gitStore.loadStatus()
+
+      const tip = gitStore.tip as IValidBranch
+      await gitStore.loadLocalCommits(tip.branch)
+
+      expect(gitStore.localCommitSHAs).toHaveLength(1)
+
+      await gitStore.undoCommit(firstCommit!)
+
+      await gitStore.loadStatus()
+      expect(gitStore.tip.kind).toEqual(TipState.Unborn)
+
+      await gitStore.loadLocalCommits(null)
+
+      expect(gitStore.localCommitSHAs).toHaveLength(0)
+    })
+
+    it('has no staged files', async () => {
+      const gitStore = new GitStore(repo!, shell)
+
+      await gitStore.loadStatus()
+
+      const tip = gitStore.tip as IValidBranch
+      await gitStore.loadLocalCommits(tip.branch)
+
+      expect(gitStore.localCommitSHAs.length).toEqual(1)
+
+      await gitStore.undoCommit(firstCommit!)
+
+      // compare the index state to some other tree-ish
+      // 4b825dc642cb6eb9a060e54bf8d69288fbee4904 is the magic empty tree
+      // if nothing is staged, this should return no entries
+      const result = await GitProcess.exec(
+        [
+          'diff-index',
+          '--name-status',
+          '-z',
+          '4b825dc642cb6eb9a060e54bf8d69288fbee4904',
+        ],
+        repo!.path
+      )
+      expect(result.stdout.length).toEqual(0)
+    })
   })
 
-  it('hides commented out lines from MERGE_MSG', async () => {
-    const repo = await setupConflictedRepo()
-    const gitStore = new GitStore(repo, shell)
+  describe('repository with HEAD file', () => {
+    it('can discard modified change cleanly', async () => {
+      const path = await setupFixtureRepository('repository-with-HEAD-file')
+      const repo = new Repository(path, 1, null, false)
+      const gitStore = new GitStore(repo, shell)
 
-    await gitStore.loadContextualCommitMessage()
+      const file = 'README.md'
+      const filePath = Path.join(repo.path, file)
 
-    const context = gitStore.contextualCommitMessage
-    expect(context).to.not.be.null
-    expect(context!.summary).to.equal(`Merge branch 'master' into other-branch`)
-    expect(context!.description).to.be.null
+      await FSE.writeFile(filePath, 'SOME WORDS GO HERE\n')
+
+      let status = await getStatusOrThrow(repo!)
+      let files = status.workingDirectory.files
+      expect(files.length).toEqual(1)
+
+      await gitStore.discardChanges([files[0]])
+
+      status = await getStatusOrThrow(repo)
+      files = status.workingDirectory.files
+      expect(files.length).toEqual(0)
+    })
   })
 })

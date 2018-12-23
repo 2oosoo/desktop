@@ -1,11 +1,13 @@
 import { ipcRenderer } from 'electron'
 import { ExecutableMenuItem } from '../models/app-menu'
-import { MenuIDs } from '../main-process/menu'
+import { MenuIDs, MenuLabels } from '../main-process/menu'
 import { IMenuItemState } from '../lib/menu-update'
-import { ILogEntry } from '../lib/logging/main'
+import { IMenuItem } from '../lib/menu-item'
 
 /** Set the menu item's enabledness. */
-export function updateMenuState(state: Array<{id: MenuIDs, state: IMenuItemState}>) {
+export function updateMenuState(
+  state: Array<{ id: MenuIDs; state: IMenuItemState }>
+) {
   ipcRenderer.send('update-menu-state', state)
 }
 
@@ -23,7 +25,10 @@ export function executeMenuItem(item: ExecutableMenuItem) {
  * Show the OS-provided certificate trust dialog for the certificate, using the
  * given message.
  */
-export function showCertificateTrustDialog(certificate: Electron.Certificate, message: string) {
+export function showCertificateTrustDialog(
+  certificate: Electron.Certificate,
+  message: string
+) {
   ipcRenderer.send('show-certificate-trust-dialog', { certificate, message })
 }
 
@@ -35,7 +40,7 @@ export function showCertificateTrustDialog(certificate: Electron.Certificate, me
  * that would tell the app to quit.
  */
 export function sendWillQuitSync() {
-  // tslint:disable-next-line:no-sync-functions
+  // eslint-disable-next-line no-sync
   ipcRenderer.sendSync('will-quit')
 }
 
@@ -46,20 +51,6 @@ export function sendWillQuitSync() {
  */
 export function getAppMenu() {
   ipcRenderer.send('get-app-menu')
-}
-
-export interface IMenuItem {
-  /** The user-facing label. */
-  readonly label?: string
-
-  /** The action to invoke when the user selects the item. */
-  readonly action?: () => void
-
-  /** The type of item. */
-  readonly type?: 'separator'
-
-  /** Is the menu item enabled? Defaults to true. */
-  readonly enabled?: boolean
 }
 
 /**
@@ -75,17 +66,24 @@ let currentContextualMenuItems: ReadonlyArray<IMenuItem> | null = null
  * should be called only once, around app load time.
  */
 export function registerContextualMenuActionDispatcher() {
-  ipcRenderer.on('contextual-menu-action', (event: Electron.IpcRendererEvent, index: number) => {
-    if (!currentContextualMenuItems) { return }
-    if (index >= currentContextualMenuItems.length) { return }
+  ipcRenderer.on(
+    'contextual-menu-action',
+    (event: Electron.IpcMessageEvent, index: number) => {
+      if (!currentContextualMenuItems) {
+        return
+      }
+      if (index >= currentContextualMenuItems.length) {
+        return
+      }
 
-    const item = currentContextualMenuItems[index]
-    const action = item.action
-    if (action) {
-      action()
-      currentContextualMenuItems = null
+      const item = currentContextualMenuItems[index]
+      const action = item.action
+      if (action) {
+        action()
+        currentContextualMenuItems = null
+      }
     }
-  })
+  )
 }
 
 /** Show the given menu items in a contextual menu. */
@@ -94,11 +92,29 @@ export function showContextualMenu(items: ReadonlyArray<IMenuItem>) {
   ipcRenderer.send('show-contextual-menu', items)
 }
 
-/**
- * Dispatches the given log entry to the main process where it will be picked
- * written to all log transports. See initializeWinston in logger.ts for more
- * details about what transports we set up.
- */
-export function log(entry: ILogEntry) {
-  ipcRenderer.send('log', entry)
+/** Update the menu item labels with the user's preferred apps. */
+export function updatePreferredAppMenuItemLabels(labels: MenuLabels) {
+  ipcRenderer.send('update-preferred-app-menu-item-labels', labels)
+}
+
+function getIpcFriendlyError(error: Error) {
+  return {
+    message: error.message || `${error}`,
+    name: error.name || `${error.name}`,
+    stack: error.stack || undefined,
+  }
+}
+
+export function reportUncaughtException(error: Error) {
+  ipcRenderer.send('uncaught-exception', getIpcFriendlyError(error))
+}
+
+export function sendErrorReport(
+  error: Error,
+  extra: { [key: string]: string } = {}
+) {
+  ipcRenderer.send('send-error-report', {
+    error: getIpcFriendlyError(error),
+    extra,
+  })
 }
